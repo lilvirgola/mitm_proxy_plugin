@@ -72,10 +72,9 @@ class OpenAPIMutationAddon:
 
     def request(self, flow: http.HTTPFlow):
         flow.metadata["request_id"] = str(uuid.uuid4())
-        if self.campaign:
-            flow.metadata["campaign_id"] = self.campaign["campaign_id"]
-
-        if not self.spec or not self.catalog: # Spec or catalog not loaded
+        
+        # Proceed if EITHER catalog OR campaign is loaded :')
+        if not self.spec or (not self.catalog and not self.campaign):
             return  
         
         # Match Request to OpenAPI Operation
@@ -94,20 +93,13 @@ class OpenAPIMutationAddon:
                 {"Content-Type": "application/json"}
             )
             return
-        # If campaign mode is active, check if the request matches the active operation_id
-        if self.campaign:
-            if self.campaign.get("mode") == "baseline":
+
+        # Assign Mutant for the Response Phase 
+        if self.catalog and not self.campaign:
+            mutant = self.catalog.get_next_mutant(op_id)
+            if mutant is None:
                 return
-
-            if self.active_operation_id and op_id == self.active_operation_id:
-                self.campaign_stats["matched_requests"] += 1
-
-            return
-        # else assign Mutant for the Response Phase
-        mutant = self.catalog.get_next_mutant(op_id)
-        if mutant is None:
-            return
-        flow.metadata["active_mutant"] = mutant
+            flow.metadata["active_mutant"] = mutant
 
     def response(self, flow: http.HTTPFlow):
         if not flow.response:
