@@ -1,0 +1,28 @@
+[project]
+name = "mitm-proxy-plugin"
+version = "0.1.0"
+description = "A mitm proxy plugin for intercepting and modifying HTTP/HTTPS traffic to and from a target application for black-box mutation testing of REST APIs using the corresponding OpenAPI specification."
+readme = "README.md"
+authors = [
+    { name = "virgola", email = "alessandro.debiasi@protonmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "jsonschema>=4.26.0",
+    "mitmproxy>=11.0.2",
+    "pyyaml>=6.0.3",
+    "requests>=2.34.2",
+]
+
+[project.scripts]
+mitm-proxy-plugin = "mitm_proxy_plugin:main"
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

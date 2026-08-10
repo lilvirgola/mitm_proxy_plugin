@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.pytest_cache/
+
+# Virtual environments
+.venv
+
+# project specific files
+*.log
+executions.jsonl
+results/
+campaigns/
+!src/mitm_proxy_plugin/campaigns/
+state/
