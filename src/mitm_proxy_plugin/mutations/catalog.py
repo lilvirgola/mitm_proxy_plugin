@@ -2,6 +2,23 @@
 this class is used for managing the catalog of mutants for the MITM Proxy plugin. 
 """
 from .taxonomy import enrich_mutant
+import re
+
+
+def _sanitize_id(raw: str) -> str:
+    sanitized = raw.replace("/", "_")
+    sanitized = sanitized.replace("{", "")
+    sanitized = sanitized.replace("}", "")
+    sanitized = sanitized.replace(" ", "_")
+    sanitized = sanitized.replace(":", "_")
+    sanitized = sanitized.replace("?", "_")
+    sanitized = sanitized.replace("&", "_")
+    sanitized = sanitized.replace("=", "_")
+    # Collapse multiple underscores
+    sanitized = re.sub(r"_+", "_", sanitized)
+    # Remove leading/trailing underscores
+    sanitized = sanitized.strip("_")
+    return sanitized
 
 
 class MutantCatalog:
@@ -26,7 +43,8 @@ class MutantCatalog:
                 if method not in ["get", "post", "put", "delete", "patch"]:
                     continue
                 # get the operationId, or generate one if missing
-                op_id = operation.get("operationId", f"{method}_{path}")
+                raw_op_id = operation.get("operationId", f"{method}_{path}")
+                op_id = _sanitize_id(raw_op_id)
                 self.catalog[op_id] = []
 
                 # let's add generic taxonomy mutants for every operation

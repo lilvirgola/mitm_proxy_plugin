@@ -2,6 +2,7 @@ import json
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 from mitm_proxy_plugin.core.rng import SeededRNG
 from mitm_proxy_plugin.mutations.catalog import MutantCatalog
@@ -15,8 +16,24 @@ def sha256_json(obj: dict) -> str:
     ).hexdigest()
 
 
+def _sanitize_filename(name: str) -> str:
+    """Make a string safe for use as a file name."""
+    name = name.replace("/", "_")
+    name = name.replace("{", "")
+    name = name.replace("}", "")
+    name = name.replace(" ", "_")
+    name = name.replace(":", "_")
+    name = name.replace("?", "_")
+    name = name.replace("&", "_")
+    name = name.replace("=", "_")
+    name = re.sub(r"_+", "_", name)
+    name = name.strip("_")
+    return name
+
+
 def _write_campaign(out_dir: Path, campaign: Campaign) -> Path:
-    path = out_dir / f"{campaign.campaign_id}.json"
+    safe_name = _sanitize_filename(campaign.campaign_id)
+    path = out_dir / f"{safe_name}.json"
     with path.open("w") as f:
         json.dump(campaign.to_dict(), f, indent=2)
     return path
@@ -77,7 +94,8 @@ def generate_campaigns(
 
     # Mutation campaigns, one per mutant
     for index, mutant in enumerate(mutants, start=1):
-        campaign_id = f"c{index:04d}_{mutant['id']}"
+        safe_mutant_id = _sanitize_filename(mutant['id'])
+        campaign_id = f"c{index:04d}_{safe_mutant_id}"
 
         campaign = Campaign(
             campaign_id=campaign_id,
