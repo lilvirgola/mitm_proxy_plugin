@@ -114,9 +114,13 @@ class OpenAPIMutationAddon:
             if self.campaign.get("mode") == "baseline":
                 return
 
+
+            op_id = flow.metadata.get("op_id")
+            ctx.log.info(f" DEBUG: path={flow.request.path} | matched_op={op_id} | target_op={self.active_operation_id}")
+
             # Mutate only the target operation
             if self.active_operation_id:
-                if flow.metadata.get("op_id") != self.active_operation_id:
+                if op_id!= self.active_operation_id:
                     return
 
             mutant = self.active_mutant
