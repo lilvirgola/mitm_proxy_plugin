@@ -32,48 +32,61 @@ class OpenAPIMutationAddon:
     def configure(self, updated):
         self.rng.set_seed(ctx.options.mutation_seed)
         self.logger.open(ctx.options.exec_log)
-        ctx.log.info(f"Execution log will be written to: {ctx.options.exec_log}")
-        # if there's a campaign file, load it and set the active mutant and operation_id
+
+        ctx.log.info(
+            f"Execution log will be written to: {ctx.options.exec_log}"
+        )
+
+        # The OpenAPI spec is always required for request matching.
+        self.spec = load_spec(ctx.options.openapi_spec)
+
+        # Campaign mode
         if ctx.options.campaign_file:
             with open(ctx.options.campaign_file, "r") as f:
                 self.campaign = json.load(f)
 
             if self.campaign.get("mode") == "single_mutant":
                 self.active_mutant = self.campaign["mutant"]
-                self.active_operation_id = self.campaign.get("target", {}).get("operation_id")
+                self.active_operation_id = (
+                    self.campaign.get("target", {}).get("operation_id")
+                )
 
             ctx.log.info(
                 f"Campaign mode enabled: {self.campaign['campaign_id']} "
                 f"mode={self.campaign.get('mode')}"
             )
+
             return
 
-        # else load the OpenAPI spec and generate the mutant catalog
+        # Normal mutation-catalog mode
         disabled_operators = {
-            op.strip() 
-            for op in ctx.options.disabled_operators.split(",") 
+            op.strip()
+            for op in ctx.options.disabled_operators.split(",")
             if op.strip()
         }
-        
+
         if disabled_operators:
-            ctx.log.info(f"Disabled operators: {sorted(disabled_operators)}")
-        
-        self.spec = load_spec(ctx.options.openapi_spec)
-        
-        # Pass the set to the MutantCatalog
+            ctx.log.info(
+                f"Disabled operators: {sorted(disabled_operators)}"
+            )
+
         self.catalog = MutantCatalog(
-            self.spec, 
-            self.rng, 
-            disabled_operators=disabled_operators
+            self.spec,
+            self.rng,
+            disabled_operators=disabled_operators,
         )
+
         self.catalog.generate()
-        
-        ctx.log.info(f"Loaded spec and generated {self.catalog.total_mutants()} total mutants.")
+
+        ctx.log.info(
+            f"Loaded spec and generated "
+            f"{self.catalog.total_mutants()} total mutants."
+        )
 
     def request(self, flow: http.HTTPFlow):
         flow.metadata["request_id"] = str(uuid.uuid4())
         
-        # Proceed if EITHER catalog OR campaign is loaded :')
+        # Proceed if EITHER catalog (legacy mode) OR campaign (campaign mode) is loaded
         if not self.spec or (not self.catalog and not self.campaign):
             return  
         
@@ -94,8 +107,16 @@ class OpenAPIMutationAddon:
             )
             return
 
-        # Assign Mutant for the Response Phase 
-        if self.catalog and not self.campaign:
+        # If campaign mode is active
+        if self.campaign:
+            if self.campaign.get("mode") == "baseline":
+                return
+                
+            if self.active_operation_id and op_id == self.active_operation_id:
+                flow.metadata["active_mutant"] = self.active_mutant
+            return
+
+        if self.catalog:
             mutant = self.catalog.get_next_mutant(op_id)
             if mutant is None:
                 return
