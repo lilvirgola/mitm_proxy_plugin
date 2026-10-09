@@ -17,3 +17,6 @@ results/
 campaigns/
 !src/mitm_proxy_plugin/campaigns/
 state/
+
+#ignore coverage files
+.coverage

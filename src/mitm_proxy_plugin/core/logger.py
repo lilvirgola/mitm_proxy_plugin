@@ -3,7 +3,7 @@ Execution logger for logging mutant executions, eg. save the execution details t
 """
 import json
 import threading
-from datetime import datetime, timezone
+import time
 from mitmproxy import ctx
 
 class ExecutionLogger:
@@ -19,7 +19,7 @@ class ExecutionLogger:
 
     def log_execution(self, flow, mutant: dict, campaign_id: str | None = None):
         entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": time.time(),
             "campaign_id": campaign_id or flow.metadata.get("campaign_id"),
             "request_id": flow.metadata.get("request_id"),
             "operation_id": flow.metadata.get("op_id"),
