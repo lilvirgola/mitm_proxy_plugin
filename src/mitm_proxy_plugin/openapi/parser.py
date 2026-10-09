@@ -2,52 +2,67 @@ import re
 from urllib.parse import urlparse
 from mitmproxy import http, ctx
 
-def openapi_path_to_regex(spec_path: str) -> re.Pattern:
+class OpenAPIMatcher:
     """
-    Converts an OpenAPI path template (e.g., /api/albums/{id}) into a strict regex.
-    Allows an optional trailing slash.
+    Pre-compiles OpenAPI paths into regexes for high-performance matching.
+    Designed to be instantiated once when the spec is loaded.
     """
-    # Replace {param} with a regex that matches any non-slash characters
-    regex_str = re.sub(r'\{[^}]+\}', r'[^/]+', spec_path)
-    # Anchor the regex to the start and end of the string
-    return re.compile(f"^{regex_str}/?$")
-
-def match_operation(spec: dict, flow: http.HTTPFlow):
-    raw_path = flow.request.path
-    
-    # Safely extract the path, handling both relative (/api/albums) 
-    # and absolute (http://127.0.0.1:8080/api/albums) URIs
-    if raw_path.startswith("http://") or raw_path.startswith("https://"):
-        path = urlparse(raw_path).path
-    else:
-        path = raw_path.split('?')[0]
+    def __init__(self, spec: dict):
+        self.spec = spec
+        self.routes = []  # List of tuples: (compiled_regex, spec_path, path_item_dict)
         
-    method = flow.request.method.lower()
-    
-    if not spec or 'paths' not in spec:
-        ctx.log.error("match_operation: OpenAPI spec is empty or missing 'paths'!")
+        if not spec or 'paths' not in spec:
+            ctx.log.warn("OpenAPI spec is empty or missing 'paths'.")
+            return
+
+        # 1. Extract base path from 'servers' (Crucial for Spring Boot / Train Ticket)
+        # e.g., if servers[0].url is "http://localhost:8080/api/v1/orderservice", base_path becomes "/api/v1/orderservice"
+        self.base_path = ""
+        servers = spec.get('servers', [])
+        if servers and isinstance(servers, list) and 'url' in servers[0]:
+            parsed_server = urlparse(servers[0]['url'])
+            self.base_path = parsed_server.path.rstrip('/')
+
+        # 2. Sort paths by length descending to match more specific paths first
+        # e.g., /api/albums/{id}/photos before /api/albums/{id}
+        sorted_paths = sorted(spec['paths'].keys(), key=len, reverse=True)
+        
+        # 3. Pre-compile all regexes
+        for spec_path in sorted_paths:
+            # Combine base_path and spec_path
+            full_path = f"{self.base_path}{spec_path}" if self.base_path else spec_path
+            
+            # Replace {param} with a regex that matches any non-slash characters
+            regex_str = re.sub(r'\{[^}]+\}', r'[^/]+', full_path)
+            pattern = re.compile(f"^{regex_str}/?$")
+            
+            self.routes.append((pattern, spec_path, spec['paths'][spec_path]))
+            
+        ctx.log.info(f"[OpenAPIMatcher] Compiled {len(self.routes)} routes (base_path='{self.base_path}')")
+
+    def match(self, flow: http.HTTPFlow):
+        """Fast path matching using pre-compiled regexes."""
+        raw_path = flow.request.path
+        
+        # Safely extract the path, handling both relative and absolute URIs
+        if raw_path.startswith("http://") or raw_path.startswith("https://"):
+            path = urlparse(raw_path).path
+        else:
+            path = raw_path.split('?')[0]
+            
+        method = flow.request.method.lower()
+        
+        # Iterate through pre-compiled routes
+        for pattern, spec_path, path_item in self.routes:
+            if pattern.match(path):
+                # Case-insensitive method lookup
+                method_key = next((k for k in path_item.keys() if k.lower() == method), None)
+                if method_key:
+                    operation = path_item[method_key]
+                    op_id = operation.get('operationId', f"{method}_{spec_path}")
+                    return op_id, operation
+                    
+        # Optional: uncomment for debugging unmatched internal mesh traffic
+        # ctx.log.debug(f"NO MATCH: {method.upper()} {path}")
+        
         return None, None
-
-    # Sort paths by length descending to match more specific paths first
-    # e.g., /api/albums/{id}/photos before /api/albums/{id} before /api/albums
-    sorted_paths = sorted(spec.get('paths', {}).keys(), key=len, reverse=True)
-    
-    for spec_path in sorted_paths:
-        path_item = spec['paths'][spec_path]
-        
-        # Case-insensitive method lookup (handles 'GET' vs 'get')
-        method_key = next((k for k in path_item.keys() if k.lower() == method), None)
-        if not method_key:
-            continue
-            
-        path_regex = openapi_path_to_regex(spec_path)
-        if path_regex.match(path):
-            operation = path_item[method_key]
-            op_id = operation.get('operationId', f"{method}_{spec_path}")
-            return op_id, operation
-            
-    # NOTE: If we reach here, nothing matched. 
-    # This will print exactly what it was looking for and what the spec actually contains.
-    ctx.log.error(f" NO MATCH: method='{method}' path='{path}'. Spec has {len(sorted_paths)} paths. Sample paths: {sorted_paths[:5]}")
-    
-    return None, None

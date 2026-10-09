@@ -1,5 +1,6 @@
 import json
 import time
+import asyncio
 from .taxonomy import enrich_mutant
 
 """
@@ -12,30 +13,26 @@ The flow object needs:
     - flow.response.headers
 """
 
-def apply_mutation(flow, mutant: dict) -> None:
-
+async def apply_mutation(flow, mutant: dict) -> None:
     mutant = enrich_mutant(mutant)
     operator = mutant.get("operator")
     
-    # Connection / execution disruptions
     if operator == "ConnectionDrop":
         flow.kill()
         return
 
     if operator == "Timeout":
-        time.sleep(float(mutant.get("delay", 10)))
+        await asyncio.sleep(float(mutant.get("delay", 10))) # NON-BLOCKING
         return
 
     if operator == "TimeoutThenDrop":
-        time.sleep(float(mutant.get("delay", 5)))
+        await asyncio.sleep(float(mutant.get("delay", 5)))  # NON-BLOCKING
         flow.kill()
         return
 
     if operator == "SlowResponse":
-        time.sleep(float(mutant.get("delay", 2)))
-        # Continue and mutate the response as well.
+        await asyncio.sleep(float(mutant.get("delay", 2)))  # NON-BLOCKING
 
-    # Response-based mutations
     mutate_response(flow.response, mutant)
 
 

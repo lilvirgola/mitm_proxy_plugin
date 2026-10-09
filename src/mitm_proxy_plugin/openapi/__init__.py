@@ -1,10 +1,7 @@
 """
-MITM Proxy plugin for OpenAPI specification handling.
+OpenAPI loading and matching utilities.
 """
 from .loader import load_spec
-from .parser import match_operation
+from .parser import OpenAPIMatcher
 
-__all__ = [
-    "load_spec",
-    "match_operation",
-]
+__all__ = ["load_spec", "OpenAPIMatcher"]
