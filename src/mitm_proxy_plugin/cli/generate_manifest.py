@@ -212,51 +212,89 @@ def scan_restberus_dir(
     force: bool = False,
     api_filter: str | None = None,
 ) -> None:
-    """Scan RESTberus directory for Train Ticket OpenAPI specs."""
-    # RESTberus stores specs in apis/ directory
-    apis_dir = restberus_dir / "apis"
+    """Scan RESTberus specs/ directory for OpenAPI specifications.
     
-    if not apis_dir.exists():
-        print(f"ERROR: {apis_dir} does not exist.")
+    Expected structure:
+        RESTberus/
+        ├── specs/
+        │   ├── train-ticket/
+        │   │   ├── ts-auth-service.json
+        │   │   ├── ts-auth-service.dict.json
+        │   │   ├── ts-basic-service.json
+        │   │   └── ...
+        │   ├── blog/
+        │   │   └── blog.json
+        │   └── restcountries/
+        │       └── restcountries.json
+        └── manifests/           ← output goes here
+            ├── train-ticket/
+            │   ├── ts-auth-service/
+            │   │   └── manifest.jsonl
+            │   └── ts-basic-service/
+            │       └── manifest.jsonl
+            └── blog/
+                └── blog/
+                    └── manifest.jsonl
+    """
+    specs_dir = restberus_dir / "specs"
+
+    if not specs_dir.exists():
+        print(f"ERROR: {specs_dir} does not exist.")
         sys.exit(1)
 
     total_generated = 0
+    total_skipped = 0
 
-    for api_dir in sorted(apis_dir.iterdir()):
-        if not api_dir.is_dir():
+    for system_dir in sorted(specs_dir.iterdir()):
+        if not system_dir.is_dir():
             continue
 
-        api_name = api_dir.name
+        system_name = system_dir.name
 
-        # Apply API filter
-        if api_filter and api_filter not in api_name:
-            continue
-
-        # RESTberus spec naming convention
-        spec_path = api_dir / "openapi.json"
-        if not spec_path.exists():
-            spec_path = api_dir / "specifications" / f"{api_name}-openapi.json"
-        if not spec_path.exists():
-            continue
-
-        # Output to a manifests/ directory in RESTberus root
-        out_dir = restberus_dir / "manifests" / api_name
-
-        count = generate_for_spec(
-            spec_path=spec_path,
-            out_dir=out_dir,
-            seed=seed,
-            disabled_operators=disabled_operators,
-            enabled_operators=enabled_operators,
-            max_per_operation=max_per_operation,
-            dry_run=dry_run,
-            force=force,
+        # Find all OpenAPI spec JSON files (exclude .dict.json files)
+        spec_files = sorted(
+            f for f in system_dir.glob("*.json")
+            if not f.name.endswith(".dict.json")
+            and f.name != "dictionary.schema.json"
         )
 
-        if count > 0:
-            total_generated += count
+        if not spec_files:
+            continue
 
-    print(f"\n  RESTberus scan complete: {total_generated} campaigns generated.")
+        for spec_path in spec_files:
+            # Extract service name from filename (e.g., "ts-auth-service.json" -> "ts-auth-service")
+            service_name = spec_path.stem
+
+            # Apply API filter (substring match)
+            if api_filter and api_filter not in service_name:
+                continue
+
+            # Output: manifests/{system}/{service}/manifest.jsonl
+            out_dir = restberus_dir / "manifests" / system_name / service_name
+
+            count = generate_for_spec(
+                spec_path=spec_path,
+                out_dir=out_dir,
+                seed=seed,
+                disabled_operators=disabled_operators,
+                enabled_operators=enabled_operators,
+                max_per_operation=max_per_operation,
+                dry_run=dry_run,
+                force=force,
+            )
+
+            if count > 0:
+                total_generated += count
+            else:
+                total_skipped += 1
+
+    print(f"\n{'='*60}")
+    print(f"  RESTberus Scan Complete")
+    print(f"{'='*60}")
+    print(f"  Specs processed:  {total_generated + total_skipped}")
+    print(f"  Campaigns generated: {total_generated}")
+    print(f"  Skipped:          {total_skipped}")
+    print(f"{'='*60}")
 
 
 def main():
