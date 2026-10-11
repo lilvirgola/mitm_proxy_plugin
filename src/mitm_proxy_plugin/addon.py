@@ -2,6 +2,8 @@ import uuid
 import json
 import asyncio
 import threading
+import os
+import time
 from typing import Optional
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -15,7 +17,7 @@ from mitm_proxy_plugin.mutations.operators import apply_mutation
 
 # --- HTTP Control Plane for Dynamic Swapping ---
 class ControlPlaneHandler(BaseHTTPRequestHandler):
-    addon: Optional["OpenAPIMutationAddon"] = None  # Will be injected with the addon instance
+    addon: Optional["OpenAPIMutationAddon"] = None
 
     def do_POST(self):
         if self.addon is None:
@@ -71,13 +73,12 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
                 }
             self._send_json(200, status)
         elif parsed.path == '/drain':
-            # RESTberus will call: GET /drain?seq=42
             query = parse_qs(parsed.query)
             last_seq = int(query.get('seq', [0])[0])
+            entry_type = query.get('type', [None])[0]  # Support filtering by "mutation" or "observation"
             
-            logs = self.addon.logger.drain(last_seq)
+            logs = self.addon.logger.drain(last_seq, entry_type)
             self._send_json(200, {"logs": logs, "current_seq": self.addon.logger.seq})
-            
         else:
             self.send_error(404)
 
@@ -88,7 +89,6 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode())
 
     def log_message(self, format, *args):
-        # Route HTTP server logs to mitmproxy's logger
         ctx.log.info(f"[Control Plane] {format % args}")
 
 
@@ -99,7 +99,6 @@ class OpenAPIMutationAddon:
         self.validator = RequestValidator()
         self.matcher = None
         
-        # State variables (protected by lock for thread safety)
         self.state_lock = threading.Lock()
         self.campaign = None
         self.active_mutant = None
@@ -109,6 +108,8 @@ class OpenAPIMutationAddon:
             "mutated_responses": 0,
             "blocked_invalid_requests": 0,
         }
+        self._observer_mode = False
+        self.service_name = "unknown"
 
     def load(self, loader):
         loader.add_option("openapi_spec", str, "", "Path to OpenAPI 3.0 JSON/YAML")
@@ -116,21 +117,33 @@ class OpenAPIMutationAddon:
         loader.add_option("exec_log", str, "executions.jsonl", "Path to execution log")
         loader.add_option("campaign_file", str, "", "Path to initial campaign JSON file (optional)")
         loader.add_option("mutation_control_port", int, 8081, "Port for the dynamic mutation control plane API")
+        loader.add_option("service_name", str, "unknown", "Name of the service this proxy is attached to")
 
     def configure(self, updated):
         self.rng.set_seed(ctx.options.mutation_seed)
         self.logger.open(ctx.options.exec_log)
-        ctx.log.info(f"Execution log will be written to: {ctx.options.exec_log}")
+        
+        # Use mitmproxy option, fallback to environment variable
+        self.service_name = ctx.options.service_name if ctx.options.service_name != "unknown" else os.environ.get("SERVICE_NAME", "unknown")
+        ctx.log.info(f"Execution log will be written to: {ctx.options.exec_log} for service: {self.service_name}")
+        
+        spec_path = ctx.options.openapi_spec
 
-        # Load OpenAPI spec and compile routes (Required for fast matching)
-        if ctx.options.openapi_spec:
-            spec = load_spec(ctx.options.openapi_spec)
-            self.matcher = OpenAPIMatcher(spec)
-            ctx.log.info(f"Loaded OpenAPI spec and compiled routes.")
-        else:
-            ctx.log.warn("No OpenAPI spec provided. Mutation matching will be disabled.")
+        if not spec_path or not os.path.exists(spec_path):
+            ctx.log.info(
+                f"[Mutation Addon] No OpenAPI spec at '{spec_path}'. "
+                f"Running in OBSERVER mode (passthrough, no mutations)."
+            )
+            self.matcher = None
+            self.campaign = None
+            self._observer_mode = True
+            return
 
-        # Load initial campaign from file (if provided at startup)
+        self._observer_mode = False
+        spec = load_spec(spec_path)
+        self.matcher = OpenAPIMatcher(spec)
+        ctx.log.info(f"Loaded OpenAPI spec and compiled routes for {self.service_name}.")
+
         if ctx.options.campaign_file:
             with open(ctx.options.campaign_file, "r") as f:
                 initial_campaign = json.load(f)
@@ -141,7 +154,6 @@ class OpenAPIMutationAddon:
                         self.active_operation_id = initial_campaign.get("target", {}).get("operation_id")
             ctx.log.info(f"Loaded initial campaign: {self.campaign['campaign_id']}")
 
-        # Start the HTTP Control Plane in a background thread
         ControlPlaneHandler.addon = self
         port = ctx.options.mutation_control_port
         
@@ -153,11 +165,25 @@ class OpenAPIMutationAddon:
         threading.Thread(target=run_server, daemon=True).start()
 
     def request(self, flow: http.HTTPFlow):
+        # Always generate a unique request ID for correlation
         flow.metadata["request_id"] = str(uuid.uuid4())
-        if not self.matcher: return
+        
+        # Extract Istio trace ID if present (crucial for cross-service correlation)
+        trace_header = flow.request.headers.get("x-b3-traceid") or flow.request.headers.get("traceparent", "")
+        if trace_header and "-" in trace_header:
+            flow.metadata["trace_id"] = trace_header.split("-")[1]
+        else:
+            flow.metadata["trace_id"] = trace_header or "unknown"
+
+        # Default role is observer
+        flow.metadata["role"] = "observer"
+
+        if self._observer_mode or not self.matcher:
+            return
             
         op_id, operation = self.matcher.match(flow)
-        if not op_id: return 
+        if not op_id: 
+            return 
             
         flow.metadata["op_id"] = op_id
         
@@ -169,7 +195,6 @@ class OpenAPIMutationAddon:
         if not current_campaign or current_campaign.get("mode") == "baseline":
             return
 
-        # Validate Request
         error = self.validator.validate(flow, operation)
         if error:
             flow.response = http.Response.make(400, b'{"error": "Invalid Request"}', {"Content-Type": "application/json"})
@@ -178,24 +203,41 @@ class OpenAPIMutationAddon:
         if current_campaign.get("mode") == "single_mutant":
             if active_op_id and op_id == active_op_id:
                 flow.metadata["active_mutant"] = active_mutant
+                flow.metadata["role"] = "mutator"
 
     async def response(self, flow: http.HTTPFlow):
-        if not flow.response: return
+        if not flow.response: 
+            return
 
-        mutant = flow.metadata.get("active_mutant")
-        if not mutant: return
-
-        # Apply the mutation asynchronously
-        await apply_mutation(flow, mutant)
+        role = flow.metadata.get("role", "observer")
         
-        with self.state_lock:
-            campaign_id = self.campaign["campaign_id"] if self.campaign else "unknown"
-            
-        flow.response.headers["X-Campaign-Id"] = campaign_id
-        flow.response.headers["X-Mutant-Id"] = mutant["id"]
+        # 1. Check if this response contains mutation headers from a DOWNSTREAM service
+        downstream_mutant_id = flow.response.headers.get("X-Mutant-Id")
+        downstream_campaign_id = flow.response.headers.get("X-Campaign-Id")
 
-        # Log to the in-memory buffer
-        self.logger.log_execution(flow, mutant, campaign_id=campaign_id)
+        if downstream_mutant_id:
+            # We observed a propagated mutation! Store it in metadata for the logger
+            flow.metadata["observed_mutant_id"] = downstream_mutant_id
+            flow.metadata["observed_campaign_id"] = downstream_campaign_id
+            ctx.log.info(f"[{role.capitalize()}] Detected propagated mutation '{downstream_mutant_id}' in response to {flow.request.path} (Status: {flow.response.status_code})")
+        
+        # 2. ALWAYS log the observation for this traffic (whether we mutated it or just observed it)
+        self.logger.log_observation(flow, self.service_name, role)
+
+        # 3. If WE are the mutator, apply the mutation and stamp our headers
+        mutant = flow.metadata.get("active_mutant")
+        if mutant:
+            await apply_mutation(flow, mutant)
+            
+            with self.state_lock:
+                campaign_id = self.campaign["campaign_id"] if self.campaign else "unknown"
+            
+            # Stamp headers so upstream services can see OUR mutation
+            flow.response.headers["X-Campaign-Id"] = campaign_id
+            flow.response.headers["X-Mutant-Id"] = mutant["id"]
+
+            # Log the specific execution details
+            self.logger.log_execution(flow, mutant, campaign_id=campaign_id)
 
     def done(self):
         self.logger.close()
