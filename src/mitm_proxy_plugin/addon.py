@@ -195,11 +195,6 @@ class OpenAPIMutationAddon:
         if not current_campaign or current_campaign.get("mode") == "baseline":
             return
 
-        error = self.validator.validate(flow, operation)
-        if error:
-            flow.response = http.Response.make(400, b'{"error": "Invalid Request"}', {"Content-Type": "application/json"})
-            return
-
         if current_campaign.get("mode") == "single_mutant":
             if active_op_id and op_id == active_op_id:
                 flow.metadata["active_mutant"] = active_mutant
