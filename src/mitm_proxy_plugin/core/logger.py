@@ -44,7 +44,7 @@ class ExecutionLogger:
             "service_name": service_name,
             "role": role,
             "request_id": flow.metadata.get("request_id"),
-            "trace_id": flow.request.headers.get("x-b3-traceid") or flow.request.headers.get("traceparent", "").split("-")[1] if flow.request.headers.get("traceparent") else None,
+            "trace_id": self._extract_trace_id(flow),
             "method": flow.request.method,
             "path": flow.request.path.split("?")[0],
             "request_status": flow.response.status_code if flow.response else "DROPPED",
@@ -69,6 +69,30 @@ class ExecutionLogger:
         if self.file:
             self.file.write(json.dumps(entry) + '\n')
             self.file.flush()
+
+    def _extract_trace_id(self, flow) -> str | None:
+        """Extract trace ID from request headers, supporting multiple formats."""
+        # Try B3 format first 
+        trace_id = flow.request.headers.get("x-b3-traceid")
+        if trace_id:
+            return trace_id
+        
+        # Try W3C Trace Context format
+        traceparent = flow.request.headers.get("traceparent")
+        if traceparent:
+            parts = traceparent.split("-")
+            if len(parts) >= 2:
+                return parts[1]
+        
+        # Try Jaeger format
+        uber_trace = flow.request.headers.get("uber-trace-id")
+        if uber_trace:
+            # Format: {trace-id}:{span-id}:{parent-span-id}:{flags}
+            parts = uber_trace.split(":")
+            if parts:
+                return parts[0]
+        
+        return None
 
     def drain(self, last_seq: int = 0, entry_type: str | None = None) -> list:
         """Returns all log entries with seq > last_seq."""
