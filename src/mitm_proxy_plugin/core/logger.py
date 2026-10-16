@@ -32,6 +32,7 @@ class ExecutionLogger:
             "taxonomy_path": mutant.get("taxonomy_path"),
             "status": "EXECUTED",
             "response_status": flow.response.status_code if flow.response else "DROPPED",
+            "interaction_id": flow.metadata.get("interaction_id"),
         }
         self._append(entry)
 
@@ -49,9 +50,9 @@ class ExecutionLogger:
             "request_status": flow.response.status_code if flow.response else "DROPPED",
             "response_size": len(flow.response.content) if flow.response else 0,
             "campaign_id": flow.metadata.get("campaign_id"),
-            # NEW: Capture propagated mutation info if this proxy saw it from downstream
             "observed_mutant_id": flow.metadata.get("observed_mutant_id"),
             "observed_campaign_id": flow.metadata.get("observed_campaign_id"),
+            "interaction_id": flow.metadata.get("interaction_id"),
         }
         self._append(entry)
 

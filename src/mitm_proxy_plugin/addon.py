@@ -110,6 +110,13 @@ class OpenAPIMutationAddon:
         }
         self._observer_mode = False
         self.service_name = "unknown"
+        self._interaction_counter = 0
+        self._counter_lock = threading.Lock()
+
+    def _next_interaction_id(self) -> int:
+        with self._counter_lock:
+            self._interaction_counter += 1
+            return self._interaction_counter
 
     def load(self, loader):
         loader.add_option("openapi_spec", str, "", "Path to OpenAPI 3.0 JSON/YAML")
@@ -200,13 +207,17 @@ class OpenAPIMutationAddon:
                 flow.metadata["active_mutant"] = active_mutant
                 flow.metadata["role"] = "mutator"
 
+        # Sequential index of this interaction within the run
+        flow.metadata["interaction_id"] = self._next_interaction_id()
+        flow.metadata["request_id"] = str(uuid.uuid4())
+
     async def response(self, flow: http.HTTPFlow):
         if not flow.response: 
             return
 
         role = flow.metadata.get("role", "observer")
         
-        # 1. Check if this response contains mutation headers from a DOWNSTREAM service
+        # Check if this response contains mutation headers from a DOWNSTREAM service
         downstream_mutant_id = flow.response.headers.get("X-Mutant-Id")
         downstream_campaign_id = flow.response.headers.get("X-Campaign-Id")
 
@@ -216,10 +227,10 @@ class OpenAPIMutationAddon:
             flow.metadata["observed_campaign_id"] = downstream_campaign_id
             ctx.log.info(f"[{role.capitalize()}] Detected propagated mutation '{downstream_mutant_id}' in response to {flow.request.path} (Status: {flow.response.status_code})")
         
-        # 2. ALWAYS log the observation for this traffic (whether we mutated it or just observed it)
+        # ALWAYS log the observation for this traffic (whether we mutated it or just observed it)
         self.logger.log_observation(flow, self.service_name, role)
 
-        # 3. If WE are the mutator, apply the mutation and stamp our headers
+        # If WE are the mutator, apply the mutation and stamp our headers
         mutant = flow.metadata.get("active_mutant")
         if mutant:
             await apply_mutation(flow, mutant)
