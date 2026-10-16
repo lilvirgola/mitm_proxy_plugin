@@ -44,7 +44,7 @@ class ExecutionLogger:
             "service_name": service_name,
             "role": role,
             "request_id": flow.metadata.get("request_id"),
-            "trace_id": flow.metadata.get("trace_id"),
+            "trace_id": flow.request.headers.get("x-b3-traceid") or flow.request.headers.get("traceparent", "").split("-")[1] if flow.request.headers.get("traceparent") else None,
             "method": flow.request.method,
             "path": flow.request.path.split("?")[0],
             "request_status": flow.response.status_code if flow.response else "DROPPED",
