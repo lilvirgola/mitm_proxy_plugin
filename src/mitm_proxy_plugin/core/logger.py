@@ -23,6 +23,7 @@ class ExecutionLogger:
             "type": "mutation",
             "timestamp": time.time(),
             "campaign_id": campaign_id or flow.metadata.get("campaign_id"),
+            "trace_id": self._extract_trace_id(flow),
             "request_id": flow.metadata.get("request_id"),
             "operation_id": flow.metadata.get("op_id"),
             "method": flow.request.method,
