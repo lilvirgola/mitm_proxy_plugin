@@ -73,7 +73,11 @@ class ExecutionLogger:
 
     def _extract_trace_id(self, flow) -> str | None:
         """Extract trace ID from request headers, supporting multiple formats."""
-        # Try B3 format first 
+        
+        req_id = flow.request.headers.get("x-request-id")
+        if req_id:
+            return req_id
+        # Try B3 format 
         trace_id = flow.request.headers.get("x-b3-traceid")
         if trace_id:
             return trace_id
