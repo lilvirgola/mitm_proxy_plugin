@@ -175,7 +175,7 @@ class OpenAPIMutationAddon:
         # Always generate a unique request ID for correlation
         flow.metadata["request_id"] = str(uuid.uuid4())
         # log all incoming headers for debugging
-        ctx.log.debug(f"[{self.service_name}] Incoming request headers: {dict(flow.request.headers)}")
+        ctx.log.info(f"[{self.service_name}] Incoming request headers: {dict(flow.request.headers)}")
         # Extract Istio trace ID if present (crucial for cross-service correlation)
         trace_header = flow.request.headers.get("x-b3-traceid") or flow.request.headers.get("traceparent", "")
         if trace_header and "-" in trace_header:
