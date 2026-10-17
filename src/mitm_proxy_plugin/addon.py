@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 from mitmproxy import http, ctx
 
-from mitm_proxy_plugin.core import SeededRNG, ExecutionLogger, RequestValidator
+from mitm_proxy_plugin.core import SeededRNG, ExecutionLogger, RequestValidator, extract_trace_id
 from mitm_proxy_plugin.openapi.parser import OpenAPIMatcher
 from mitm_proxy_plugin.openapi.loader import load_spec
 from mitm_proxy_plugin.mutations.operators import apply_mutation
@@ -172,16 +172,16 @@ class OpenAPIMutationAddon:
         threading.Thread(target=run_server, daemon=True).start()
 
     def request(self, flow: http.HTTPFlow):
-        # Always generate a unique request ID for correlation
-        flow.metadata["request_id"] = str(uuid.uuid4())
-        # log all incoming headers for debugging
-        ctx.log.info(f"[{self.service_name}] Incoming request headers: {dict(flow.request.headers)}")
-        # Extract Istio trace ID if present (crucial for cross-service correlation)
-        trace_header = flow.request.headers.get("x-b3-traceid") or flow.request.headers.get("traceparent", "")
-        if trace_header and "-" in trace_header:
-            flow.metadata["trace_id"] = trace_header.split("-")[1]
+        # 1. Extract the propagated trace ID FIRST
+        trace_id = extract_trace_id(flow)
+        flow.metadata["trace_id"] = trace_id
+        
+        # 2. Use the propagated header as request_id if it exists, otherwise generate one
+        header_req_id = flow.request.headers.get("x-request-id")
+        if header_req_id:
+            flow.metadata["request_id"] = header_req_id
         else:
-            flow.metadata["trace_id"] = trace_header or "unknown"
+            flow.metadata["request_id"] = trace_id or str(uuid.uuid4())
 
         # Default role is observer
         flow.metadata["role"] = "observer"
@@ -208,9 +208,8 @@ class OpenAPIMutationAddon:
                 flow.metadata["active_mutant"] = active_mutant
                 flow.metadata["role"] = "mutator"
 
-        # Sequential index of this interaction within the run
+        # Sequential index of this interaction within the run (LOCAL to this proxy)
         flow.metadata["interaction_id"] = self._next_interaction_id()
-        flow.metadata["request_id"] = str(uuid.uuid4())
 
     async def response(self, flow: http.HTTPFlow):
         if not flow.response: 

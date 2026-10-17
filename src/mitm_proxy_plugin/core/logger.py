@@ -5,6 +5,7 @@ import json
 import threading
 import time
 from mitmproxy import ctx
+from .helpers import extract_trace_id
 
 
 class ExecutionLogger:
@@ -23,7 +24,7 @@ class ExecutionLogger:
             "type": "mutation",
             "timestamp": time.time(),
             "campaign_id": campaign_id or flow.metadata.get("campaign_id"),
-            "trace_id": self._extract_trace_id(flow),
+            "trace_id": extract_trace_id(flow),
             "request_id": flow.metadata.get("request_id"),
             "operation_id": flow.metadata.get("op_id"),
             "method": flow.request.method,
@@ -45,7 +46,7 @@ class ExecutionLogger:
             "service_name": service_name,
             "role": role,
             "request_id": flow.metadata.get("request_id"),
-            "trace_id": self._extract_trace_id(flow),
+            "trace_id": extract_trace_id(flow),
             "method": flow.request.method,
             "path": flow.request.path.split("?")[0],
             "request_status": flow.response.status_code if flow.response else "DROPPED",
@@ -71,33 +72,7 @@ class ExecutionLogger:
             self.file.write(json.dumps(entry) + '\n')
             self.file.flush()
 
-    def _extract_trace_id(self, flow) -> str | None:
-        """Extract trace ID from request headers, supporting multiple formats."""
-        
-        req_id = flow.request.headers.get("x-request-id")
-        if req_id:
-            return req_id
-        # Try B3 format 
-        trace_id = flow.request.headers.get("x-b3-traceid")
-        if trace_id:
-            return trace_id
-        
-        # Try W3C Trace Context format
-        traceparent = flow.request.headers.get("traceparent")
-        if traceparent:
-            parts = traceparent.split("-")
-            if len(parts) >= 2:
-                return parts[1]
-        
-        # Try Jaeger format
-        uber_trace = flow.request.headers.get("uber-trace-id")
-        if uber_trace:
-            # Format: {trace-id}:{span-id}:{parent-span-id}:{flags}
-            parts = uber_trace.split(":")
-            if parts:
-                return parts[0]
-        
-        return None
+    
 
     def drain(self, last_seq: int = 0, entry_type: str | None = None) -> list:
         """Returns all log entries with seq > last_seq."""
