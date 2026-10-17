@@ -175,6 +175,8 @@ class OpenAPIMutationAddon:
         # 1. Extract the propagated trace ID FIRST
         trace_id = extract_trace_id(flow)
         flow.metadata["trace_id"] = trace_id
+
+        ctx.log.info(f"[HEADERS] headers: {flow.request.headers}")
         
         # 2. Use the propagated header as request_id if it exists, otherwise generate one
         header_req_id = flow.request.headers.get("x-request-id")
