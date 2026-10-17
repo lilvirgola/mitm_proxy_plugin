@@ -37,6 +37,9 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
                     if new_campaign.get("mode") == "single_mutant":
                         self.addon.active_mutant = new_campaign.get("mutant")
                         self.addon.active_operation_id = new_campaign.get("target", {}).get("operation_id")
+                        # reset the mutant interaction counter for the new campaign
+                        with self.addon._mutant_counter_lock:
+                            self.addon.mutant_interaction_counter = 0
                     elif new_campaign.get("mode") == "baseline":
                         self.addon.active_mutant = None
                         self.addon.active_operation_id = None
@@ -51,6 +54,9 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
                 self.addon.campaign = None
                 self.addon.active_mutant = None
                 self.addon.active_operation_id = None
+                # reset counter even in baseline mode
+                with self.addon._mutant_counter_lock:
+                    self.addon.mutant_interaction_counter = 0
             self._send_json(200, {"status": "cleared"})
             ctx.log.info("[Control Plane] Campaign cleared (baseline mode)")
         else:
@@ -75,7 +81,7 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
         elif parsed.path == '/drain':
             query = parse_qs(parsed.query)
             last_seq = int(query.get('seq', [0])[0])
-            entry_type = query.get('type', [None])[0]  # Support filtering by "mutation" or "observation"
+            entry_type = query.get('type', [None])[0]
             
             logs = self.addon.logger.drain(last_seq, entry_type)
             self._send_json(200, {"logs": logs, "current_seq": self.addon.logger.seq})
@@ -110,13 +116,24 @@ class OpenAPIMutationAddon:
         }
         self._observer_mode = False
         self.service_name = "unknown"
+        
+        # global interaction counter (never resets, unique across all requests)
         self._interaction_counter = 0
         self._counter_lock = threading.Lock()
+        
+        # mutation-specific interaction counter (resets on new campaign)
+        self.mutant_interaction_counter = 0
+        self._mutant_counter_lock = threading.Lock()
 
     def _next_interaction_id(self) -> int:
         with self._counter_lock:
             self._interaction_counter += 1
             return self._interaction_counter
+
+    def _next_mutant_interaction_id(self) -> int:
+        with self._mutant_counter_lock:
+            self.mutant_interaction_counter += 1
+            return self.mutant_interaction_counter
 
     def load(self, loader):
         loader.add_option("openapi_spec", str, "", "Path to OpenAPI 3.0 JSON/YAML")
@@ -130,7 +147,6 @@ class OpenAPIMutationAddon:
         self.rng.set_seed(ctx.options.mutation_seed)
         self.logger.open(ctx.options.exec_log)
         
-        # Use mitmproxy option, fallback to environment variable
         self.service_name = ctx.options.service_name if ctx.options.service_name != "unknown" else os.environ.get("SERVICE_NAME", "unknown")
         ctx.log.info(f"Execution log will be written to: {ctx.options.exec_log} for service: {self.service_name}")
         
@@ -159,6 +175,9 @@ class OpenAPIMutationAddon:
                     if initial_campaign.get("mode") == "single_mutant":
                         self.active_mutant = initial_campaign.get("mutant")
                         self.active_operation_id = initial_campaign.get("target", {}).get("operation_id")
+                        # reset the mutant interaction counter for the new campaign
+                        with self._mutant_counter_lock:
+                            self.mutant_interaction_counter = 0
             ctx.log.info(f"Loaded initial campaign: {self.campaign['campaign_id']}")
 
         ControlPlaneHandler.addon = self
@@ -175,20 +194,18 @@ class OpenAPIMutationAddon:
         # 1. Get the incoming x-request-id, or generate a new UUID if missing
         raw_corr_id = flow.request.headers.get("x-request-id") or str(uuid.uuid4())
         
-        # 2. Clean the ID to be a valid 32-char W3C trace-id (remove hyphens)
-        # If it's a standard UUID, removing hyphens makes it exactly 32 chars.
+        # 2. Clean the ID to be a valid 32-char W3C trace-id
         clean_trace_id = raw_corr_id.replace("-", "")[:32].ljust(32, '0')
         
-        # 3. Generate a new 16-char hex parent-id for this specific hop (mitmproxy)
+        # 3. Generate a new 16-char hex parent-id for this specific hop
         parent_id = uuid.uuid4().hex[:16]
         
-        # 4. INJECT the headers so Spring Cloud Sleuth picks them up and propagates them
+        # 4. INJECT the headers
         flow.request.headers["x-request-id"] = raw_corr_id
         flow.request.headers["x-b3-traceid"] = clean_trace_id
-        # W3C format: 00-{32-char-trace-id}-{16-char-parent-id}-{01-sampled}
         flow.request.headers["traceparent"] = f"00-{clean_trace_id}-{parent_id}-01"
         
-        # 5. Save locally for logging (use the raw_corr_id so it matches the fuzzer's logs)
+        # 5. Save locally for logging
         flow.metadata["trace_id"] = raw_corr_id
         flow.metadata["request_id"] = raw_corr_id
         
@@ -213,11 +230,14 @@ class OpenAPIMutationAddon:
             return
 
         if current_campaign.get("mode") == "single_mutant":
+            # assign a sequential interaction ID for this mutant execution
+            flow.metadata["mutant_interaction_id"] = self._next_mutant_interaction_id()
+            
             if active_op_id and op_id == active_op_id:
                 flow.metadata["active_mutant"] = active_mutant
                 flow.metadata["role"] = "mutator"
 
-        # Sequential index of this interaction within the run (LOCAL to this proxy)
+        # Sequential index of this interaction within the run (GLOBAL, never resets)
         flow.metadata["interaction_id"] = self._next_interaction_id()
 
     async def response(self, flow: http.HTTPFlow):
@@ -226,20 +246,18 @@ class OpenAPIMutationAddon:
 
         role = flow.metadata.get("role", "observer")
         
-        # Check if this response contains mutation headers from a DOWNSTREAM service
         downstream_mutant_id = flow.response.headers.get("X-Mutant-Id")
         downstream_campaign_id = flow.response.headers.get("X-Campaign-Id")
 
         if downstream_mutant_id:
-            # We observed a propagated mutation! Store it in metadata for the logger
             flow.metadata["observed_mutant_id"] = downstream_mutant_id
             flow.metadata["observed_campaign_id"] = downstream_campaign_id
             ctx.log.info(f"[{role.capitalize()}] Detected propagated mutation '{downstream_mutant_id}' in response to {flow.request.path} (Status: {flow.response.status_code})")
         
-        # ALWAYS log the observation for this traffic (whether we mutated it or just observed it)
+        # ALWAYS log the observation
         self.logger.log_observation(flow, self.service_name, role)
 
-        # If WE are the mutator, apply the mutation and stamp our headers
+        # If WE are the mutator, apply the mutation
         mutant = flow.metadata.get("active_mutant")
         if mutant:
             await apply_mutation(flow, mutant)
@@ -247,11 +265,9 @@ class OpenAPIMutationAddon:
             with self.state_lock:
                 campaign_id = self.campaign["campaign_id"] if self.campaign else "unknown"
             
-            # Stamp headers so upstream services can see OUR mutation
             flow.response.headers["X-Campaign-Id"] = campaign_id
             flow.response.headers["X-Mutant-Id"] = mutant["id"]
 
-            # Log the specific execution details
             self.logger.log_execution(flow, mutant, campaign_id=campaign_id)
 
     def done(self):

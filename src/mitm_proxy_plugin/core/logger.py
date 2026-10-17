@@ -35,6 +35,7 @@ class ExecutionLogger:
             "status": "EXECUTED",
             "response_status": flow.response.status_code if flow.response else "DROPPED",
             "interaction_id": flow.metadata.get("interaction_id"),
+            "mutant_interaction_id": flow.metadata.get("mutant_interaction_id"),
         }
         self._append(entry)
 
@@ -55,6 +56,7 @@ class ExecutionLogger:
             "observed_mutant_id": flow.metadata.get("observed_mutant_id"),
             "observed_campaign_id": flow.metadata.get("observed_campaign_id"),
             "interaction_id": flow.metadata.get("interaction_id"),
+            "mutant_interaction_id": flow.metadata.get("mutant_interaction_id"),
         }
         self._append(entry)
 
@@ -71,8 +73,6 @@ class ExecutionLogger:
         if self.file:
             self.file.write(json.dumps(entry) + '\n')
             self.file.flush()
-
-    
 
     def drain(self, last_seq: int = 0, entry_type: str | None = None) -> list:
         """Returns all log entries with seq > last_seq."""
