@@ -230,8 +230,6 @@ class OpenAPIMutationAddon:
             return
 
         if current_campaign.get("mode") == "single_mutant":
-            # assign a sequential interaction ID for this mutant execution
-            flow.metadata["mutant_interaction_id"] = self._next_mutant_interaction_id()
             
             if active_op_id and op_id == active_op_id:
                 flow.metadata["active_mutant"] = active_mutant
@@ -239,6 +237,8 @@ class OpenAPIMutationAddon:
 
         # Sequential index of this interaction within the run (GLOBAL, never resets)
         flow.metadata["interaction_id"] = self._next_interaction_id()
+        # assign a sequential interaction ID for this mutant execution
+        flow.metadata["mutant_interaction_id"] = self._next_mutant_interaction_id()
 
     async def response(self, flow: http.HTTPFlow):
         if not flow.response: 
