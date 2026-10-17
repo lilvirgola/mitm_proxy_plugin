@@ -172,19 +172,26 @@ class OpenAPIMutationAddon:
         threading.Thread(target=run_server, daemon=True).start()
 
     def request(self, flow: http.HTTPFlow):
-        # 1. Extract the propagated trace ID FIRST
-        trace_id = extract_trace_id(flow)
-        flow.metadata["trace_id"] = trace_id
-
-        ctx.log.info(f"[HEADERS] headers: {flow.request.headers}")
+        # 1. Get the incoming x-request-id, or generate a new UUID if missing
+        raw_corr_id = flow.request.headers.get("x-request-id") or str(uuid.uuid4())
         
-        # 2. Use the propagated header as request_id if it exists, otherwise generate one
-        header_req_id = flow.request.headers.get("x-request-id")
-        if header_req_id:
-            flow.metadata["request_id"] = header_req_id
-        else:
-            flow.metadata["request_id"] = trace_id or str(uuid.uuid4())
-
+        # 2. Clean the ID to be a valid 32-char W3C trace-id (remove hyphens)
+        # If it's a standard UUID, removing hyphens makes it exactly 32 chars.
+        clean_trace_id = raw_corr_id.replace("-", "")[:32].ljust(32, '0')
+        
+        # 3. Generate a new 16-char hex parent-id for this specific hop (mitmproxy)
+        parent_id = uuid.uuid4().hex[:16]
+        
+        # 4. INJECT the headers so Spring Cloud Sleuth picks them up and propagates them
+        flow.request.headers["x-request-id"] = raw_corr_id
+        flow.request.headers["x-b3-traceid"] = clean_trace_id
+        # W3C format: 00-{32-char-trace-id}-{16-char-parent-id}-{01-sampled}
+        flow.request.headers["traceparent"] = f"00-{clean_trace_id}-{parent_id}-01"
+        
+        # 5. Save locally for logging (use the raw_corr_id so it matches the fuzzer's logs)
+        flow.metadata["trace_id"] = raw_corr_id
+        flow.metadata["request_id"] = raw_corr_id
+        
         # Default role is observer
         flow.metadata["role"] = "observer"
 
