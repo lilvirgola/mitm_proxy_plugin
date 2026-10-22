@@ -35,6 +35,7 @@ class ExecutionLogger:
             "status": "EXECUTED",
             "response_status": flow.response.status_code if flow.response else "DROPPED",
             "interaction_id": flow.metadata.get("interaction_id"),
+            "system_interaction_id": flow.metadata.get("system_interaction_id"),
             "mutant_interaction_id": flow.metadata.get("mutant_interaction_id"),
         }
         self._append(entry)
@@ -57,6 +58,7 @@ class ExecutionLogger:
             "observed_campaign_id": flow.metadata.get("observed_campaign_id"),
             "interaction_id": flow.metadata.get("interaction_id"),
             "mutant_interaction_id": flow.metadata.get("mutant_interaction_id"),
+            "system_interaction_id": flow.metadata.get("system_interaction_id"),
         }
         self._append(entry)
 

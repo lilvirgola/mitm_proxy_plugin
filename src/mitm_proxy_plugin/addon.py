@@ -117,18 +117,27 @@ class OpenAPIMutationAddon:
         self._observer_mode = False
         self.service_name = "unknown"
         
-        # global interaction counter (never resets, unique across all requests)
-        self._interaction_counter = 0
-        self._counter_lock = threading.Lock()
+        # Local interaction counter (Service IFE)
+        self._local_interaction_counter = 0
+        self._local_counter_lock = threading.Lock()
+        
+        # System interaction counter (System IFE) - Only used if IS_EDGE_PROXY=true
+        self._system_interaction_counter = 0
+        self._system_counter_lock = threading.Lock()
         
         # mutation-specific interaction counter (resets on new campaign)
         self.mutant_interaction_counter = 0
         self._mutant_counter_lock = threading.Lock()
 
-    def _next_interaction_id(self) -> int:
-        with self._counter_lock:
-            self._interaction_counter += 1
-            return self._interaction_counter
+    def _next_local_interaction_id(self) -> int:
+        with self._local_counter_lock:
+            self._local_interaction_counter += 1
+            return self._local_interaction_counter
+
+    def _next_system_interaction_id(self) -> int:
+        with self._system_counter_lock:
+            self._system_interaction_counter += 1
+            return self._system_interaction_counter
 
     def _next_mutant_interaction_id(self) -> int:
         with self._mutant_counter_lock:
@@ -212,6 +221,22 @@ class OpenAPIMutationAddon:
         # Default role is observer
         flow.metadata["role"] = "observer"
 
+        
+        is_edge = os.environ.get("IS_EDGE_PROXY", "false").lower() == "true"
+        system_interaction_id = flow.request.headers.get("x-restberus-system-interaction")
+        
+        if system_interaction_id and system_interaction_id.isdigit():
+            # We are a downstream proxy, read the propagated global counter
+            flow.metadata["system_interaction_id"] = int(system_interaction_id)
+        elif is_edge:
+            # We are the edge proxy, generate the global counter and stamp it
+            sys_id = self._next_system_interaction_id()
+            flow.metadata["system_interaction_id"] = sys_id
+            flow.request.headers["x-restberus-system-interaction"] = str(sys_id)
+        else:
+            # Downstream proxy, but header was missing (e.g., internal call)
+            flow.metadata["system_interaction_id"] = None
+
         if self._observer_mode or not self.matcher:
             return
             
@@ -230,13 +255,12 @@ class OpenAPIMutationAddon:
             return
 
         if current_campaign.get("mode") == "single_mutant":
-            
             if active_op_id and op_id == active_op_id:
                 flow.metadata["active_mutant"] = active_mutant
                 flow.metadata["role"] = "mutator"
 
-        # Sequential index of this interaction within the run (GLOBAL, never resets)
-        flow.metadata["interaction_id"] = self._next_interaction_id()
+        # Sequential index of this interaction within the run (LOCAL to this service)
+        flow.metadata["interaction_id"] = self._next_local_interaction_id()
         # assign a sequential interaction ID for this mutant execution
         flow.metadata["mutant_interaction_id"] = self._next_mutant_interaction_id()
 
