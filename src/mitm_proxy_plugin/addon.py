@@ -40,9 +40,11 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
                         # reset the mutant interaction counter for the new campaign
                         with self.addon._mutant_counter_lock:
                             self.addon.mutant_interaction_counter = 0
+                        self.addon._campaign_start_system_id = new_campaign.get("start_interaction_id", 0)
                     elif new_campaign.get("mode") == "baseline":
                         self.addon.active_mutant = None
                         self.addon.active_operation_id = None
+                        self.addon._campaign_start_system_id = 0
                 
                 self._send_json(200, {"status": "ok", "campaign_id": new_campaign.get("campaign_id")})
                 ctx.log.info(f"[Control Plane] Campaign swapped to: {new_campaign.get('campaign_id')}")
@@ -124,6 +126,9 @@ class OpenAPIMutationAddon:
         # System interaction counter (System IFE) - Only used if IS_EDGE_PROXY=true
         self._system_interaction_counter = 0
         self._system_counter_lock = threading.Lock()
+
+        # Store the baseline provided by the RunManager
+        self._campaign_start_system_id = 0
         
         # mutation-specific interaction counter (resets on new campaign)
         self.mutant_interaction_counter = 0
@@ -250,6 +255,7 @@ class OpenAPIMutationAddon:
             current_campaign = self.campaign
             active_op_id = self.active_operation_id
             active_mutant = self.active_mutant
+            campaign_start_id = self._campaign_start_system_id
 
         if not current_campaign or current_campaign.get("mode") == "baseline":
             return
@@ -258,6 +264,7 @@ class OpenAPIMutationAddon:
             if active_op_id and op_id == active_op_id:
                 flow.metadata["active_mutant"] = active_mutant
                 flow.metadata["role"] = "mutator"
+                flow.metadata["campaign_start_system_id"] = campaign_start_id
 
         # Sequential index of this interaction within the run (LOCAL to this service)
         flow.metadata["interaction_id"] = self._next_local_interaction_id()

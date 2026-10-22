@@ -37,6 +37,7 @@ class ExecutionLogger:
             "interaction_id": flow.metadata.get("interaction_id"),
             "system_interaction_id": flow.metadata.get("system_interaction_id"),
             "mutant_interaction_id": flow.metadata.get("mutant_interaction_id"),
+            "campaign_start_system_id": flow.metadata.get("campaign_start_system_id"),
         }
         self._append(entry)
 
