@@ -1,7 +1,9 @@
 """
 Shared pytest fixtures
 """
+
 import pytest
+
 
 class FakeResponse:
     def __init__(self, status_code: int = 200, content: bytes = b""):
@@ -34,4 +36,5 @@ def fake_flow():
 def make_flow():
     def _make(content: bytes, status_code: int = 200):
         return FakeFlow(FakeResponse(status_code=status_code, content=content))
+
     return _make

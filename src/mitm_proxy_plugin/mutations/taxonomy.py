@@ -2,7 +2,6 @@
 # This dictionary maps mutation operators to their taxonomy metadata, including category, path, leaf, and description.
 # This is used to enrich mutants with additional information for reporting and analysis.
 OPERATOR_TAXONOMY = {
-
     # Service Description Faults
     "MalformedJSON": {
         "category": "Service Description Fault",
@@ -64,7 +63,6 @@ OPERATOR_TAXONOMY = {
         "leaf": "Implicit Interface",
         "description": "Adds an undocumented HTTP header.",
     },
-
     # Execution Faults
     "WrongStatusCode": {
         "category": "Execution Fault",
@@ -84,7 +82,6 @@ OPERATOR_TAXONOMY = {
         "leaf": "Data Incomplete",
         "description": "Returns an empty response body when content is expected.",
     },
-
     # Service Deployment Faults
     "Simulate503": {
         "category": "Service Deployment Fault",
@@ -104,7 +101,6 @@ OPERATOR_TAXONOMY = {
         "leaf": "Service Faulty",
         "description": "Simulates an internal server error.",
     },
-
     # Discovery Faults
     "Simulate404": {
         "category": "Discovery Fault",
@@ -124,7 +120,6 @@ OPERATOR_TAXONOMY = {
         "leaf": "Routing Faulty",
         "description": "Returns an incorrect resource identifier, simulating wrong routing.",
     },
-
     # Composition Faults
     "PaginationMismatch": {
         "category": "Composition Fault",
@@ -138,7 +133,6 @@ OPERATOR_TAXONOMY = {
         "leaf": "Combined Functionality Faulty",
         "description": "Adds or changes array elements inconsistently with the expected composition.",
     },
-
     # Connection Faults
     "Simulate401": {
         "category": "Connection Fault",
@@ -183,6 +177,7 @@ OPERATOR_TAXONOMY = {
         "description": "Injects a large payload into the response.",
     },
 }
+
 
 # Adds taxonomy metadata to a mutant if it is missing.
 def enrich_mutant(mutant: dict) -> dict:

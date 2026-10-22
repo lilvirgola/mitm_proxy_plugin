@@ -1,6 +1,7 @@
 from mitm_proxy_plugin.core.rng import SeededRNG
 from mitm_proxy_plugin.mutations.catalog import MutantCatalog
 
+
 def make_minimal_spec():
     return {
         "paths": {
@@ -65,6 +66,6 @@ def test_disabled_operators():
     catalog = MutantCatalog(spec, rng, disabled_operators={"MalformedJSON"})
     catalog.generate()
 
-    for op_id, mutants in catalog.catalog.items():
+    for mutants in catalog.catalog.values():
         for mutant in mutants:
             assert mutant["operator"] != "MalformedJSON"

@@ -1,4 +1,5 @@
 from mitmproxy.http import HTTPFlow
+
 from mitm_proxy_plugin.core.validator import RequestValidator
 
 

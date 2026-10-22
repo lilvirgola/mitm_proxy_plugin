@@ -1,6 +1,5 @@
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 
 class CampaignMode(str, Enum):
@@ -37,15 +36,9 @@ class CampaignPolicy:
     @classmethod
     def from_dict(cls, data: dict) -> "CampaignPolicy":
         return cls(
-            max_one_mutant_per_operation=data.get(
-                "max_one_mutant_per_operation", True
-            ),
-            mutate_valid_requests_only=data.get(
-                "mutate_valid_requests_only", True
-            ),
-            attribution=data.get(
-                "attribution", "direct_operation_or_request"
-            ),
+            max_one_mutant_per_operation=data.get("max_one_mutant_per_operation", True),
+            mutate_valid_requests_only=data.get("mutate_valid_requests_only", True),
+            attribution=data.get("attribution", "direct_operation_or_request"),
         )
 
 
@@ -56,13 +49,13 @@ class Campaign:
     seed: int
     spec_sha256: str
     created_at: str
-    target: Optional[CampaignTarget] = None
-    mutant: Optional[dict] = None
-    assignments: Optional[dict] = None
+    target: CampaignTarget | None = None
+    mutant: dict | None = None
+    assignments: dict | None = None
     policy: CampaignPolicy = field(default_factory=CampaignPolicy)
-    claim_counter: Optional[int] = None
+    claim_counter: int | None = None
     repetition: int = 0
-    base_campaign_id: Optional[str] = None
+    base_campaign_id: str | None = None
 
     def to_dict(self) -> dict:
         result = {

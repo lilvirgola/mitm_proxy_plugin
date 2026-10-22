@@ -1,10 +1,12 @@
 """
 Execution logger for logging mutant executions and traffic observations.
 """
+
 import json
 import threading
 import time
-from mitmproxy import ctx
+from pathlib import Path
+
 from .helpers import extract_trace_id
 
 
@@ -16,50 +18,80 @@ class ExecutionLogger:
         self.lock = threading.Lock()
 
     def open(self, path: str):
-        self.file = open(path, 'a')
+        self.file = Path(path).open("a", encoding="utf-8")  # noqa: SIM115
 
     def log_execution(self, flow, mutant: dict, campaign_id: str | None = None):
         """Log a mutation execution."""
+        request = getattr(flow, "request", None)
+        response = getattr(flow, "response", None)
+        path = ""
+        method = ""
+        if request:
+            method = getattr(request, "method", "")
+            req_path = getattr(request, "path", "")
+            path = req_path.split("?")[0] if req_path else ""
+
+        status_code = (
+            getattr(response, "status_code", "DROPPED") if response else "DROPPED"
+        )
+        metadata = getattr(flow, "metadata", {}) or {}
+
         entry = {
             "type": "mutation",
             "timestamp": time.time(),
-            "campaign_id": campaign_id or flow.metadata.get("campaign_id"),
+            "campaign_id": campaign_id or metadata.get("campaign_id"),
             "trace_id": extract_trace_id(flow),
-            "request_id": flow.metadata.get("request_id"),
-            "operation_id": flow.metadata.get("op_id"),
-            "method": flow.request.method,
-            "path": flow.request.path.split("?")[0],
+            "request_id": metadata.get("request_id"),
+            "operation_id": metadata.get("op_id"),
+            "method": method,
+            "path": path,
             "mutant_id": mutant.get("id"),
             "operator": mutant.get("operator"),
             "taxonomy_path": mutant.get("taxonomy_path"),
             "status": "EXECUTED",
-            "response_status": flow.response.status_code if flow.response else "DROPPED",
-            "interaction_id": flow.metadata.get("interaction_id"),
-            "system_interaction_id": flow.metadata.get("system_interaction_id"),
-            "mutant_interaction_id": flow.metadata.get("mutant_interaction_id"),
-            "campaign_start_system_id": flow.metadata.get("campaign_start_system_id"),
+            "response_status": status_code,
+            "interaction_id": metadata.get("interaction_id"),
+            "system_interaction_id": metadata.get("system_interaction_id"),
+            "mutant_interaction_id": metadata.get("mutant_interaction_id"),
+            "campaign_start_system_id": metadata.get("campaign_start_system_id"),
         }
         self._append(entry)
 
     def log_observation(self, flow, service_name: str, role: str = "observer"):
         """Log a traffic observation."""
+        request = getattr(flow, "request", None)
+        response = getattr(flow, "response", None)
+        path = ""
+        method = ""
+        if request:
+            method = getattr(request, "method", "")
+            req_path = getattr(request, "path", "")
+            path = req_path.split("?")[0] if req_path else ""
+
+        status_code = (
+            getattr(response, "status_code", "DROPPED") if response else "DROPPED"
+        )
+        content = getattr(response, "content", None)
+        response_size = len(content) if content is not None else 0
+        metadata = getattr(flow, "metadata", {}) or {}
+
         entry = {
             "type": "observation",
             "timestamp": time.time(),
             "service_name": service_name,
             "role": role,
-            "request_id": flow.metadata.get("request_id"),
+            "request_id": metadata.get("request_id"),
             "trace_id": extract_trace_id(flow),
-            "method": flow.request.method,
-            "path": flow.request.path.split("?")[0],
-            "request_status": flow.response.status_code if flow.response else "DROPPED",
-            "response_size": len(flow.response.content) if flow.response else 0,
-            "campaign_id": flow.metadata.get("campaign_id"),
-            "observed_mutant_id": flow.metadata.get("observed_mutant_id"),
-            "observed_campaign_id": flow.metadata.get("observed_campaign_id"),
-            "interaction_id": flow.metadata.get("interaction_id"),
-            "mutant_interaction_id": flow.metadata.get("mutant_interaction_id"),
-            "system_interaction_id": flow.metadata.get("system_interaction_id"),
+            "method": method,
+            "path": path,
+            "request_status": status_code,
+            "response_size": response_size,
+            "campaign_id": metadata.get("campaign_id"),
+            "observed_mutant_id": metadata.get("observed_mutant_id"),
+            "observed_campaign_id": metadata.get("observed_campaign_id"),
+            "interaction_id": metadata.get("interaction_id"),
+            "mutant_interaction_id": metadata.get("mutant_interaction_id"),
+            "system_interaction_id": metadata.get("system_interaction_id"),
         }
         self._append(entry)
 
@@ -69,12 +101,12 @@ class ExecutionLogger:
             self.seq += 1
             entry["seq"] = self.seq
             self.buffer.append(entry)
-            
+
             if len(self.buffer) > 10000:
                 self.buffer = self.buffer[-5000:]
 
         if self.file:
-            self.file.write(json.dumps(entry) + '\n')
+            self.file.write(json.dumps(entry) + "\n")
             self.file.flush()
 
     def drain(self, last_seq: int = 0, entry_type: str | None = None) -> list:
@@ -87,14 +119,15 @@ class ExecutionLogger:
                     break
             else:
                 return []
-            
+
             entries = self.buffer[start_idx:]
-            
+
             if entry_type:
                 entries = [e for e in entries if e.get("type") == entry_type]
-            
-            return entries
+
+            return list(entries)
 
     def close(self):
         if self.file:
             self.file.close()
+            self.file = None

@@ -1,39 +1,37 @@
-import json
-import time
 import asyncio
-from .taxonomy import enrich_mutant
+import json
 
-"""
-the main function that applies a mutation to a mitmproxy flow based on the operator and mutant details
-NOTE:
-The flow object needs:
-    - flow.kill()
-    - flow.response.status_code
-    - flow.response.content
-    - flow.response.headers
-"""
+from .taxonomy import OPERATOR_TAXONOMY, enrich_mutant
+
+OPERATOR_NAMES: set[str] = set(OPERATOR_TAXONOMY.keys())
+
 
 async def apply_mutation(flow, mutant: dict) -> None:
+    """Apply a mutation to a mitmproxy flow based on the operator and mutant details."""
     mutant = enrich_mutant(mutant)
     operator = mutant.get("operator")
-    
+
     if operator == "ConnectionDrop":
-        flow.kill()
+        if hasattr(flow, "kill"):
+            flow.kill()
         return
 
     if operator == "Timeout":
-        await asyncio.sleep(float(mutant.get("delay", 10))) # NON-BLOCKING
+        await asyncio.sleep(float(mutant.get("delay", 10)))
         return
 
     if operator == "TimeoutThenDrop":
-        await asyncio.sleep(float(mutant.get("delay", 5)))  # NON-BLOCKING
-        flow.kill()
+        await asyncio.sleep(float(mutant.get("delay", 5)))
+        if hasattr(flow, "kill"):
+            flow.kill()
         return
 
     if operator == "SlowResponse":
-        await asyncio.sleep(float(mutant.get("delay", 2)))  # NON-BLOCKING
+        await asyncio.sleep(float(mutant.get("delay", 2)))
 
-    mutate_response(flow.response, mutant)
+    response = getattr(flow, "response", None)
+    if response is not None:
+        mutate_response(response, mutant)
 
 
 """
@@ -45,8 +43,10 @@ The response object needs:
     - content
     - headers
 """
+
+
 def mutate_response(response, mutant: dict) -> None:
-    
+
     operator = mutant.get("operator")
 
     # Service Description Faults -> Format Faults
@@ -66,7 +66,6 @@ def mutate_response(response, mutant: dict) -> None:
         )
         return
 
-    
     # Service Description Faults -> Content Faults
     if operator == "MissingRequired":
         target = mutant.get("target")
@@ -127,9 +126,9 @@ def mutate_response(response, mutant: dict) -> None:
         _mutate_json(response, break_boundary)
         return
 
-    
     # Service Description Faults -> Service/Description Mismatch
     if operator == "UndocumentedField":
+
         def add_undocumented_field(body):
             if isinstance(body, dict):
                 body["__mutant_undocumented"] = True
@@ -145,7 +144,6 @@ def mutate_response(response, mutant: dict) -> None:
         )
         return
 
-    
     # Execution Faults
     if operator == "WrongStatusCode":
         response.status_code = int(mutant.get("status_code", 500))
@@ -166,7 +164,6 @@ def mutate_response(response, mutant: dict) -> None:
         response.content = b""
         return
 
-    
     # Service Deployment Faults
     if operator == "Simulate503":
         response.status_code = 503
@@ -183,7 +180,6 @@ def mutate_response(response, mutant: dict) -> None:
         response.content = b'{"error": "Internal Server Error"}'
         return
 
-    
     # Discovery Faults
     if operator == "Simulate404":
         response.status_code = 404
@@ -207,9 +203,9 @@ def mutate_response(response, mutant: dict) -> None:
         _mutate_json(response, change_resource_id)
         return
 
-    
     # Composition Faults
     if operator == "PaginationMismatch":
+
         def break_pagination(body):
             if not isinstance(body, dict):
                 return
@@ -222,6 +218,7 @@ def mutate_response(response, mutant: dict) -> None:
         return
 
     if operator == "ArrayLengthMismatch":
+
         def break_array_length(body):
             if isinstance(body, dict):
                 for field in ("content", "items", "data"):
@@ -235,7 +232,6 @@ def mutate_response(response, mutant: dict) -> None:
         _mutate_json(response, break_array_length)
         return
 
-    
     # Connection Faults
     if operator == "Simulate401":
         response.status_code = 401
@@ -258,14 +254,14 @@ def mutate_response(response, mutant: dict) -> None:
         return
 
 
-
 # Helpers
+
 
 # Safely parses response.content as JSON, applies mutate_fn(body), and writes the mutated JSON back.
 def _mutate_json(response, mutate_fn) -> None:
-    
+    content = getattr(response, "content", None)
     try:
-        body = json.loads(_as_bytes(response.content) or b"{}")
+        body = json.loads(_as_bytes(content) or b"{}")
     except (TypeError, ValueError, UnicodeDecodeError):
         # If the response is not JSON, skip this mutation safely.
         return
@@ -273,6 +269,7 @@ def _mutate_json(response, mutate_fn) -> None:
     mutate_fn(body)
 
     response.content = json.dumps(body).encode("utf-8")
+
 
 # Cuts a response body to simulate a truncated message.
 def _truncate_bytes(content) -> bytes:
@@ -287,6 +284,7 @@ def _truncate_bytes(content) -> bytes:
 
     return content[: len(content) // 2]
 
+
 # Converts response content to bytes defensively.
 def _as_bytes(value) -> bytes:
 
@@ -300,6 +298,7 @@ def _as_bytes(value) -> bytes:
         return value.encode("utf-8", errors="replace")
 
     return str(value).encode("utf-8", errors="replace")
+
 
 # Sets a response header defensively.
 def _set_header(response, name: str, value: str) -> None:

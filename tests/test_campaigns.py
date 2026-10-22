@@ -1,10 +1,9 @@
+from mitm_proxy_plugin.campaigns import generate_campaigns, load_manifest
 from mitm_proxy_plugin.campaigns.models import (
     Campaign,
     CampaignMode,
     CampaignTarget,
 )
-from mitm_proxy_plugin.campaigns.generator import generate_campaigns
-from mitm_proxy_plugin.campaigns.claimer import claim_next_campaign, load_manifest
 
 
 def make_minimal_spec():
@@ -75,31 +74,23 @@ def test_generate_campaigns(tmp_path):
     assert len(raw) == len(campaigns)
 
 
-def test_claim_sequential(tmp_path):
+def test_generate_campaigns_disabled_operators(tmp_path):
     spec = make_minimal_spec()
 
-    generate_campaigns(spec=spec, seed=42, out_dir=tmp_path / "apis" / "test-api" / "campaigns")
+    campaigns_all = generate_campaigns(
+        spec=spec,
+        seed=42,
+        out_dir=tmp_path / "all",
+    )
 
-    c1 = claim_next_campaign("test-api", tmp_path)
-    c2 = claim_next_campaign("test-api", tmp_path)
+    campaigns_filtered = generate_campaigns(
+        spec=spec,
+        seed=42,
+        out_dir=tmp_path / "filtered",
+        disabled_operators={"MalformedJSON", "InvalidContentType"},
+    )
 
-    assert c1 is not None
-    assert c2 is not None
-    assert c1.campaign_id != c2.campaign_id
-    assert c1.claim_counter == 1
-    assert c2.claim_counter == 2
-
-
-def test_claim_exhausted(tmp_path):
-    spec = make_minimal_spec()
-
-    generate_campaigns(spec=spec, seed=42, out_dir=tmp_path / "apis" / "test-api" / "campaigns")
-
-    total = len(load_manifest(tmp_path / "apis" / "test-api" / "campaigns" / "manifest.jsonl"))
-
-    for _ in range(total):
-        result = claim_next_campaign("test-api", tmp_path)
-        assert result is not None
-
-    exhausted = claim_next_campaign("test-api", tmp_path, allow_repetitions=False)
-    assert exhausted is None
+    assert len(campaigns_filtered) < len(campaigns_all)
+    for c in campaigns_filtered:
+        if c.mutant:
+            assert c.mutant["operator"] not in {"MalformedJSON", "InvalidContentType"}

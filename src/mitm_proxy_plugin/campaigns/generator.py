@@ -1,19 +1,21 @@
-import json
 import hashlib
-from datetime import datetime, timezone
-from pathlib import Path
+import json
 import re
+from datetime import UTC, datetime
+from pathlib import Path
 
+from mitm_proxy_plugin.campaigns.models import (
+    Campaign,
+    CampaignMode,
+    CampaignPolicy,
+    CampaignTarget,
+)
 from mitm_proxy_plugin.core.rng import SeededRNG
 from mitm_proxy_plugin.mutations.catalog import MutantCatalog
-from mitm_proxy_plugin.mutations.taxonomy import enrich_mutant
-from mitm_proxy_plugin.campaigns.models import Campaign, CampaignMode, CampaignTarget, CampaignPolicy
 
 
 def sha256_json(obj: dict) -> str:
-    return hashlib.sha256(
-        json.dumps(obj, sort_keys=True).encode("utf-8")
-    ).hexdigest()
+    return hashlib.sha256(json.dumps(obj, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def _sanitize_filename(name: str) -> str:
@@ -46,9 +48,9 @@ def generate_campaigns(
     disabled_operators: set[str] | None = None,
     shuffle: bool = False,
 ) -> list[Campaign]:
-    
+
     spec_hash = sha256_json(spec)
-    created_at = datetime.now(timezone.utc).isoformat()
+    created_at = datetime.now(UTC).isoformat()
 
     rng = SeededRNG()
     rng.set_seed(seed)
@@ -94,7 +96,7 @@ def generate_campaigns(
 
     # Mutation campaigns, one per mutant
     for index, mutant in enumerate(mutants, start=1):
-        safe_mutant_id = _sanitize_filename(mutant['id'])
+        safe_mutant_id = _sanitize_filename(mutant["id"])
         campaign_id = f"c{index:04d}_{safe_mutant_id}"
 
         campaign = Campaign(
@@ -123,5 +125,22 @@ def generate_campaigns(
 
     print(f"Generated {len(campaigns)} campaigns in '{out_dir}'")
     print(f"Manifest written to: {manifest_path}")
+
+    return campaigns
+
+
+def load_manifest(manifest_path: Path | str) -> list[dict]:
+    """Load campaigns from a manifest.jsonl file."""
+    path = Path(manifest_path)
+    if not path.exists():
+        return []
+
+    campaigns = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            campaigns.append(json.loads(line))
 
     return campaigns

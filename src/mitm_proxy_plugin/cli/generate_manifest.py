@@ -27,9 +27,9 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from mitm_proxy_plugin.openapi.loader import load_spec
 from mitm_proxy_plugin.campaigns.generator import generate_campaigns
 from mitm_proxy_plugin.campaigns.models import Campaign
+from mitm_proxy_plugin.openapi.loader import load_spec
 
 
 def print_summary(campaigns: list[Campaign], api_name: str) -> None:
@@ -47,21 +47,21 @@ def print_summary(campaigns: list[Campaign], api_name: str) -> None:
     total_mutants = sum(operator_counts.values())
     baseline_count = sum(1 for c in campaigns if c.mode.value == "baseline")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Campaign Summary: {api_name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Total campaigns: {len(campaigns)}")
     print(f"  Baseline runs:   {baseline_count}")
     print(f"  Mutant runs:     {total_mutants}")
     print(f"\n  {'Operator':<25} {'Count':>6}")
-    print(f"  {'-'*33}")
+    print(f"  {'-' * 33}")
     for op, count in sorted(operator_counts.items(), key=lambda x: -x[1]):
         print(f"  {op:<25} {count:>6}")
     print(f"\n  {'Taxonomy Category':<25} {'Count':>6}")
-    print(f"  {'-'*33}")
+    print(f"  {'-' * 33}")
     for cat, count in sorted(taxonomy_counts.items(), key=lambda x: -x[1]):
         print(f"  {cat:<25} {count:>6}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 def generate_for_spec(
@@ -81,7 +81,9 @@ def generate_for_spec(
     if manifest_path.exists() and not force and not dry_run:
         with manifest_path.open() as f:
             count = sum(1 for line in f if line.strip())
-        print(f"  OK   {spec_path.name}: {count} campaigns exist. Use --force to regenerate.")
+        print(
+            f"  OK   {spec_path.name}: {count} campaigns exist. Use --force to regenerate."
+        )
         return 0
 
     if not spec_path.exists():
@@ -90,7 +92,7 @@ def generate_for_spec(
 
     try:
         spec = load_spec(str(spec_path))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"  ERR  {spec_path.name}: failed to parse spec: {e}")
         return 0
 
@@ -98,8 +100,9 @@ def generate_for_spec(
     if enabled_operators:
         # Whitelist mode: disable everything NOT in the whitelist
         from mitm_proxy_plugin.mutations.operators import OPERATOR_NAMES
+
         disabled_operators = OPERATOR_NAMES - enabled_operators
-    
+
     campaigns = generate_campaigns(
         spec=spec,
         seed=seed,
@@ -111,6 +114,7 @@ def generate_for_spec(
     if max_per_operation and len(campaigns) > max_per_operation:
         # Keep baseline + first N mutants per operation
         from collections import defaultdict
+
         from mitm_proxy_plugin.campaigns.models import CampaignMode
 
         limited = []
@@ -140,7 +144,9 @@ def generate_for_spec(
         for campaign in campaigns:
             f.write(json.dumps(campaign.to_dict()) + "\n")
 
-    print(f"  DONE {spec_path.name}: wrote {len(campaigns)} campaigns to {manifest_path}")
+    print(
+        f"  DONE {spec_path.name}: wrote {len(campaigns)} campaigns to {manifest_path}"
+    )
     return len(campaigns)
 
 
@@ -193,13 +199,13 @@ def scan_restgym_dir(
         else:
             total_skipped += 1
 
-    print(f"\n{'='*60}")
-    print(f"  Batch Complete")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print("  Batch Complete")
+    print(f"{'=' * 60}")
     print(f"  APIs processed: {total_generated + total_skipped}")
     print(f"  APIs generated: {total_generated}")
     print(f"  APIs skipped:   {total_skipped}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 def scan_restberus_dir(
@@ -213,7 +219,7 @@ def scan_restberus_dir(
     api_filter: str | None = None,
 ) -> None:
     """Scan RESTberus specs/ directory for OpenAPI specifications.
-    
+
     Expected structure:
         RESTberus/
         ├── specs/
@@ -253,9 +259,9 @@ def scan_restberus_dir(
 
         # Find all OpenAPI spec JSON files (exclude .dict.json files)
         spec_files = sorted(
-            f for f in system_dir.glob("*.json")
-            if not f.name.endswith(".dict.json")
-            and f.name != "dictionary.schema.json"
+            f
+            for f in system_dir.glob("*.json")
+            if not f.name.endswith(".dict.json") and f.name != "dictionary.schema.json"
         )
 
         if not spec_files:
@@ -288,13 +294,13 @@ def scan_restberus_dir(
             else:
                 total_skipped += 1
 
-    print(f"\n{'='*60}")
-    print(f"  RESTberus Scan Complete")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print("  RESTberus Scan Complete")
+    print(f"{'=' * 60}")
     print(f"  Specs processed:  {total_generated + total_skipped}")
     print(f"  Campaigns generated: {total_generated}")
     print(f"  Skipped:          {total_skipped}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 def main():
@@ -393,11 +399,15 @@ Examples:
     args = parser.parse_args()
 
     # Parse operator filters
-    disabled = {op.strip() for op in args.disabled_operators.split(",") if op.strip()} or None
+    disabled = {
+        op.strip() for op in args.disabled_operators.split(",") if op.strip()
+    } or None
     enabled = {op.strip() for op in args.operators.split(",") if op.strip()} or None
 
     if enabled and disabled:
-        print("ERROR: Cannot use both --operators (whitelist) and --disabled-operators (blacklist).")
+        print(
+            "ERROR: Cannot use both --operators (whitelist) and --disabled-operators (blacklist)."
+        )
         sys.exit(1)
 
     # Route to appropriate mode
