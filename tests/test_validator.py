@@ -43,3 +43,97 @@ def test_invalid_query_param():
     error = validator.validate(flow, make_operation())
     assert error is not None
     assert "page" in error
+
+
+def test_valid_request_body_with_ref():
+    spec = {
+        "openapi": "3.0.0",
+        "components": {
+            "schemas": {
+                "UserDto": {
+                    "type": "object",
+                    "properties": {
+                        "username": {"type": "string"},
+                        "password": {"type": "string"},
+                    },
+                    "required": ["username"],
+                }
+            }
+        },
+    }
+    operation = {
+        "operationId": "login",
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/UserDto"}
+                }
+            }
+        },
+    }
+    validator = RequestValidator(spec=spec)
+    flow = FakeFlow(
+        FakeRequest(
+            method="POST",
+            path="/login",
+            content=b'{"username": "alice", "password": "secret"}',
+        )
+    )
+    error = validator.validate(flow, operation)
+    assert error is None
+
+
+def test_invalid_request_body_with_ref():
+    spec = {
+        "openapi": "3.0.0",
+        "components": {
+            "schemas": {
+                "UserDto": {
+                    "type": "object",
+                    "properties": {
+                        "username": {"type": "string"},
+                    },
+                    "required": ["username"],
+                }
+            }
+        },
+    }
+    operation = {
+        "operationId": "login",
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/UserDto"}
+                }
+            }
+        },
+    }
+    validator = RequestValidator(spec=spec)
+    flow = FakeFlow(
+        FakeRequest(
+            method="POST",
+            path="/login",
+            content=b'{"email": "alice@example.com"}',
+        )
+    )
+    error = validator.validate(flow, operation)
+    assert error is not None
+    assert "username" in error
+
+
+def test_invalid_json_body():
+    validator = RequestValidator()
+    operation = {
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "schema": {"type": "object"}
+                }
+            }
+        }
+    }
+    flow = FakeFlow(FakeRequest(method="POST", path="/test", content=b"not json"))
+    error = validator.validate(flow, operation)
+    assert error is not None
+    assert "Invalid JSON" in error
+

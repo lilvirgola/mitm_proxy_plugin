@@ -242,9 +242,13 @@ class OpenAPIMutationAddon:
             self._observer_mode = False
             spec = load_spec(spec_path)
             self.matcher = OpenAPIMatcher(spec)
+            self.validator.set_spec(spec)
             _log_info(
                 f"Loaded OpenAPI spec and compiled routes for {self.service_name}."
             )
+
+        if not campaign_file:
+            campaign_file = os.environ.get("CAMPAIGN_CONFIG_PATH", "")
 
         if campaign_file and os.path.exists(campaign_file):
             try:
@@ -254,9 +258,6 @@ class OpenAPIMutationAddon:
                         self.campaign = initial_campaign
                         if initial_campaign.get("mode") == "single_mutant":
                             self.active_mutant = initial_campaign.get("mutant")
-                            self.active_operation_id = initial_campaign.get(
-                                "target", {}
-                            ).get("operation_id")
                             self.active_operation_id = initial_campaign.get(
                                 "target", {}
                             ).get("operation_id")
@@ -272,6 +273,7 @@ class OpenAPIMutationAddon:
                 _log_warn(
                     f"Failed to load initial campaign file '{campaign_file}': {e}"
                 )
+
 
         # Ensure control plane HTTP server is started (in mutator AND observer modes)
         ControlPlaneHandler.addon = self
