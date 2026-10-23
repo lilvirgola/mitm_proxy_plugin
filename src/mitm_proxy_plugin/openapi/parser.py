@@ -1,5 +1,5 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from mitmproxy import ctx
 
@@ -24,7 +24,7 @@ class OpenAPIMatcher:
 
     def __init__(self, spec: dict):
         self.spec = spec
-        self.routes = []  # List of tuples: (compiled_regex, spec_path, path_item_dict)
+        self.routes = []  # List of tuples: (compiled_regex, spec_path, path_item_dict, param_names)
 
         if not spec or "paths" not in spec:
             _log_warn("OpenAPI spec is empty or missing 'paths'.")
@@ -47,11 +47,14 @@ class OpenAPIMatcher:
             # Combine base_path and spec_path
             full_path = f"{self.base_path}{spec_path}" if self.base_path else spec_path
 
-            # Replace {param} with a regex that matches any non-slash characters
-            regex_str = re.sub(r"\{[^}]+\}", r"[^/]+", full_path)
+            # Extract parameter names in order and replace {param} with regex group ([^/]+)
+            param_names = re.findall(r"\{([^}]+)\}", full_path)
+            regex_str = re.sub(r"\{[^}]+\}", r"([^/]+)", full_path)
             pattern = re.compile(f"^{regex_str}/?$")
 
-            self.routes.append((pattern, spec_path, spec["paths"][spec_path]))
+            self.routes.append(
+                (pattern, spec_path, spec["paths"][spec_path], param_names)
+            )
 
         _log_info(
             f"[OpenAPIMatcher] Compiled {len(self.routes)} routes (base_path='{self.base_path}')"
@@ -76,13 +79,18 @@ class OpenAPIMatcher:
         method = getattr(request, "method", "get").lower()
 
         # Iterate through pre-compiled routes
-        for pattern, spec_path, path_item in self.routes:
-            if pattern.match(path):
+        for pattern, spec_path, path_item, param_names in self.routes:
+            m = pattern.match(path)
+            if m:
                 # Case-insensitive method lookup
                 method_key = next((k for k in path_item if k.lower() == method), None)
                 if method_key:
                     operation = path_item[method_key]
                     op_id = operation.get("operationId", f"{method}_{spec_path}")
+                    if hasattr(flow, "metadata") and isinstance(flow.metadata, dict):
+                        flow.metadata["path_params"] = {
+                            k: unquote(v) for k, v in zip(param_names, m.groups(), strict=False)
+                        }
                     return op_id, operation
 
         return None, None

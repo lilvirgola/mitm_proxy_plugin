@@ -26,17 +26,36 @@ class RequestValidator:
 
         # Validate Parameters
         query = getattr(request, "query", {}) or {}
+        headers = getattr(request, "headers", {}) or {}
+        path_params = {}
+        if hasattr(flow, "metadata") and isinstance(flow.metadata, dict):
+            path_params = flow.metadata.get("path_params", {}) or {}
+
         for param in operation.get("parameters", []):
             name = param.get("name")
             location = param.get("in")
             required = param.get("required", False)
 
-            value = query.get(name) if location == "query" else None
+            if location == "query":
+                value = query.get(name)
+            elif location == "path":
+                # If path_params has the value, use it.
+                # If path_params is empty (e.g. standalone test or unparsed), but request has a path, don't flag as missing
+                if path_params:
+                    value = path_params.get(name)
+                else:
+                    value = getattr(request, "path", None)
+            elif location == "header":
+                value = headers.get(name)
+                if value is None and hasattr(headers, "get_all"):
+                    value = headers.get(name.lower())
+            else:
+                value = None
 
             if required and value is None:
                 return f"Missing required {location} parameter: {name}"
 
-            if value is not None:
+            if value is not None and value != getattr(request, "path", None):
                 schema = param.get("schema", {})
                 p_type = schema.get("type")
                 if p_type == "integer":
@@ -44,6 +63,16 @@ class RequestValidator:
                         int(value)
                     except (ValueError, TypeError):
                         return f"Invalid type for {location} parameter: {name}"
+                elif p_type == "number":
+                    try:
+                        float(value)
+                    except (ValueError, TypeError):
+                        return f"Invalid type for {location} parameter: {name}"
+                elif (
+                    p_type == "boolean"
+                    and str(value).lower() not in ("true", "false", "0", "1")
+                ):
+                    return f"Invalid type for {location} parameter: {name}"
 
         # Validate Request Body
         if "requestBody" in operation:
